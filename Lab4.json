@@ -271,7 +271,7 @@
              "/usr/local/bin/cfn-signal -e $? ",
              "         --stack ", { "Ref" : "AWS::StackName" },
              "         --resource WebServerGroup ",
-             "         --region ", { "Ref" : "AWS::Region" }, "\n"
+             "         --region ", { "Ref" : "AWS::Region" }, "\n",
 
              "# Start up the cfn-hup daemon to listen for changes to the Web Server metadata\n",
              "/usr/local/bin/cfn-hup --config /etc/cfn --verbose\n"
@@ -280,7 +280,6 @@
       }
     },
 
-    "WebServerGroup": {
     "WebServerGroup": {
       "Type": "AWS::AutoScaling::AutoScalingGroup",
       "CreationPolicy" : {

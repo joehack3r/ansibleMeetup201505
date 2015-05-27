@@ -1,0 +1,13 @@
+# nginx logrotate configuration file
+{{ custom_logging_basepath }}/logs/nginx/access.log
+{{ custom_logging_basepath }}/logs/nginx/error.log
+{
+  rotate 30
+  daily
+  nocompress
+  dateext
+  dateformat .%Y-%m-%d
+  postrotate
+    kill -USR1 `cat {{ custom_logging_basepath }}/nginx/nginx.pid`
+  endscript
+}

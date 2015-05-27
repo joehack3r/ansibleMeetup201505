@@ -1,0 +1,43 @@
+---
+# Should avoid re-installing Nginx if already installed at desired version.
+#- name: Check if already installed
+#  command: test $({{ custom_application_basepath }}/nginx/sbin/nginx -v)"
+#  register: nginx_installed
+#  ignore_errors: True
+
+- name: Create nginx user
+  user: name=nginx comment="Nginx User" home="{{ custom_application_basepath }}/nginx" createhome=no shell=/usr/sbin/nologin
+
+- name: Download specific version
+  action: get_url url=http://nginx.org/download/nginx-{{ nginx_version }}.tar.gz dest=/tmp/nginx.tar.gz
+
+- name: Extract Nginx
+  unarchive: src=/tmp/nginx.tar.gz dest=/tmp copy=no
+
+- name: Configure Nginx
+  command: /tmp/nginx-{{ nginx_version }}/configure --prefix={{ custom_application_basepath }}/nginx {{ nginx_configure_options }} chdir=/tmp/nginx-{{ nginx_version }}
+
+- name: Make Nginx
+  command: make chdir=/tmp/nginx-{{ nginx_version }}
+
+- name: Make Install Nginx
+  command: make install chdir=/tmp/nginx-{{ nginx_version }}
+
+- name: Create Nginx config file
+  template: src=nginx.conf.j2 dest={{ custom_application_basepath }}/nginx/conf/nginx.conf owner=nginx group=nginx mode=0600
+
+- name: Create logs/nginx
+  file: path={{ custom_logging_basepath }}/nginx state=directory
+
+- name: Create logrotate file
+  template: src=nginx.logrotate.j2 dest=/etc/logrotate.d/nginx owner=root group=root mode=0600
+
+- name: Create upstart file
+  template: src=nginx.upstart.conf.j2 dest=/etc/init/nginx.conf owner=root group=root mode=0600
+
+- name: Cleanup archive
+  file: path=/tmp/nginx.tar.gz state=absent
+
+- name: Cleanup Nginx extracted path
+  file: path=/tmp/nginx-{{ nginx_version }} state=absent
+

@@ -1,0 +1,15 @@
+---
+- include: gather-ec2-facts.yml
+  when: ansible_os_family == 'Debian'
+
+- include: python-pip.yml
+  when: ansible_os_family == 'Debian'
+
+- include: cfn-helper.yml
+  when: ansible_os_family == 'Debian'
+
+- include: boto.yml
+  when: ansible_os_family == 'Debian'
+
+- include: awscli.yml
+  when: ansible_os_family == 'Debian'

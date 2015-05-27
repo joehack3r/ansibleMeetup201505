@@ -1,0 +1,289 @@
+{
+  "AWSTemplateFormatVersion" : "2010-09-09",
+
+  "Description" : "Lab 3 Solution",
+
+  "Parameters" : {
+    "AMI" : {
+      "Description" : "AMI for the Web Server",
+      "Type" : "String",
+      "AllowedPattern" : "ami-[0-9a-f]{8,8}",
+      "ConstraintDescription" : "Must be a valid AMI ID."
+    },
+
+    "InstanceType" : {
+      "Description" : "WebServer EC2 instance type.",
+      "Type" : "String",
+      "Default" : "t2.micro",
+      "AllowedValues" : [ "t1.micro", "t2.micro", "t2.small", "t2.medium", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "c1.medium", "c1.xlarge", "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge", "g2.2xlarge", "r3.large", "r3.xlarge", "r3.2xlarge", "r3.4xlarge", "r3.8xlarge", "i2.xlarge", "i2.2xlarge", "i2.4xlarge", "i2.8xlarge", "hi1.4xlarge", "hs1.8xlarge", "cr1.8xlarge", "cc2.8xlarge", "cg1.4xlarge"],
+      "ConstraintDescription" : "Must be a valid EC2 instance type."
+    },
+
+    "VpcId" : {
+      "Description" : "Physical ID of the VPC.",
+      "Type" : "String",
+      "AllowedPattern" : "vpc-[0-9a-f]{8,8}"
+    }
+
+  },
+
+  "Resources" : {
+    "ElbSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Public facing ELB security group.",
+        "SecurityGroupIngress" : [{
+          "IpProtocol" : "tcp",
+          "FromPort" : "80",
+          "ToPort" : "80",
+          "CidrIp" : "0.0.0.0/0"
+          },{
+          "IpProtocol" : "tcp",
+          "FromPort" : "443",
+          "ToPort" : "443",
+          "CidrIp" : "0.0.0.0/0"
+        }],
+        "VpcId" : { "Ref" : "VpcId" }
+      }
+    },
+
+    "WebServerSecurityGroup" : {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "Properties" : {
+        "GroupDescription" : "Web server security group.",
+        "SecurityGroupEgress" : [{
+          "IpProtocol" : "tcp",
+          "FromPort" : "80",
+          "ToPort" : "80",
+          "CidrIp" : "0.0.0.0/0"
+          },{
+          "IpProtocol" : "tcp",
+          "FromPort" : "443",
+          "ToPort" : "443",
+          "CidrIp" : "0.0.0.0/0"
+        }],
+        "VpcId" : { "Ref" : "VpcId" }
+      }
+    },
+
+    "ElbEgressToWebServerPort80": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": { "Ref": "ElbSecurityGroup" },
+        "IpProtocol": "tcp",
+        "FromPort": "80",
+        "ToPort": "80",
+        "DestinationSecurityGroupId" : { "Ref" : "WebServerSecurityGroup" }
+      }
+    },
+
+    "WebServerIngressFromElbPort80": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": { "Ref": "WebServerSecurityGroup" },
+        "IpProtocol": "tcp",
+        "FromPort": "80",
+        "ToPort": "80",
+        "SourceSecurityGroupId" : { "Ref": "ElbSecurityGroup" }
+      }
+    },
+
+    "ElbEgressToWebServerPort443": {
+      "Type": "AWS::EC2::SecurityGroupEgress",
+      "Properties": {
+        "GroupId": { "Ref": "ElbSecurityGroup" },
+        "IpProtocol": "tcp",
+        "FromPort": "443",
+        "ToPort": "443",
+        "DestinationSecurityGroupId" : { "Ref" : "WebServerSecurityGroup" }
+      }
+    },
+
+    "WebServerIngressFromElbPort443": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": { "Ref": "WebServerSecurityGroup" },
+        "IpProtocol": "tcp",
+        "FromPort": "443",
+        "ToPort": "443",
+        "SourceSecurityGroupId" : { "Ref": "ElbSecurityGroup" }
+      }
+    },
+
+    "ElasticLoadBalancer" : {
+      "Type" : "AWS::ElasticLoadBalancing::LoadBalancer",
+      "DependsOn" : [ "ElbSecurityGroup" ],
+      "Properties" : {
+        "AvailabilityZones" : { "Fn::GetAZs" : "" },
+        "CrossZone" : "true",
+        "Listeners" : [ {
+          "LoadBalancerPort" : "80",
+          "Protocol"         : "HTTP",
+          "InstancePort"     : "80",
+          "InstanceProtocol" : "HTTP"
+          }, {
+          "LoadBalancerPort" : "443",
+          "Protocol"         : "TCP",
+          "InstancePort"     : "443",
+          "InstanceProtocol" : "TCP"
+          } ],
+        "HealthCheck" : {
+          "Target" : "HTTP:80/",
+          "HealthyThreshold" : "3",
+          "UnhealthyThreshold" : "5",
+          "Interval" : "30",
+          "Timeout" : "5"
+        },
+        "SecurityGroups" : [{ "Ref" : "ElbSecurityGroup" }]
+
+      }
+    },
+
+    "DescribeHealthRole" : {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [ {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": [ "ec2.amazonaws.com" ]
+            },
+            "Action": [ "sts:AssumeRole" ]
+          } ]
+        },
+        "Path": "/",
+        "Policies" : [{
+          "PolicyName": "describe-instance-health-policy",
+          "PolicyDocument": {
+            "Statement": [{
+              "Effect": "Allow",
+              "Action": [ "elasticloadbalancing:DescribeInstanceHealth" ],
+              "Resource": "*"
+            }]
+          }
+        }]
+      }
+    },
+
+    "WebServerInstanceProfile" : { 
+        "Type": "AWS::IAM::InstanceProfile",
+        "Properties": {
+            "Path": "/",
+            "Roles": [ { "Ref": "DescribeHealthRole" } ]
+        }
+    },
+
+    "LaunchConfig" : {
+      "Type" : "AWS::AutoScaling::LaunchConfiguration",
+      "DependsOn" : [ "ElasticLoadBalancer" ],
+      "Metadata" : {
+        "Comment" : "Install Nginx and serve a single static file.",
+        "AWS::CloudFormation::Init" : {
+          "configSets" : {
+            "full_install" : [ "install_cfn", "verify_instance_health" ]
+          },
+
+          "install_cfn" : {
+            "files" : {
+              "/etc/cfn/cfn-hup.conf" : {
+                "content" : { "Fn::Join" : ["", [
+                  "[main]\n",
+                  "stack=", { "Ref" : "AWS::StackId" }, "\n",
+                  "region=", { "Ref" : "AWS::Region" }, "\n"
+                ]]},
+                "mode"    : "000400",
+                "owner"   : "root",
+                "group"   : "root"
+              },
+
+              "/etc/cfn/hooks.d/cfn-auto-reloader.conf" : {
+                "content": { "Fn::Join" : ["", [
+                  "[cfn-auto-reloader-hook]\n",
+                  "triggers=post.update\n",
+                  "path=Resources.LaunchConfig.Metadata.AWS::CloudFormation::Init\n",
+                  "action=/usr/local/bin/cfn-init -v ",
+                  "         --stack ", { "Ref" : "AWS::StackName" },
+                  "         --resource LaunchConfig ",
+                  "         --configsets full_install ",
+                  "         --region ", { "Ref" : "AWS::Region" }, "\n",
+                  "runas=root\n"
+                ]]}
+              }
+            }
+          },
+
+          "verify_instance_health" : {
+            "commands" : {
+              "ELBHealthCheck" : {
+                "command" : { "Fn::Join" : ["", [ 
+                  "until [ \"$state\" = \"\\\"InService\\\"\" ]; do ",
+                  "  state=$(aws --region ", { "Ref" : "AWS::Region" }, " elb describe-instance-health ",
+                  "              --load-balancer-name ", { "Ref" : "ElasticLoadBalancer" }, 
+                  "              --instances $(curl -s http://169.254.169.254/latest/meta-data/instance-id) ",
+                  "              --query InstanceStates[0].State); ",
+                  "  sleep 10; ",
+                  "done"
+                ]]}
+              }
+            }
+          }
+        }
+      },
+      "Properties" : {
+        "ImageId" : { "Ref" : "AMI" },
+        "SecurityGroups" : [ { "Ref" : "WebServerSecurityGroup" } ],
+        "IamInstanceProfile" : { "Ref" : "WebServerInstanceProfile" },
+        "InstanceType" : { "Ref" : "InstanceType" },
+        "UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+             "#!/bin/bash -xe\n",
+             "# Start up the cfn-hup daemon to listen for changes to the Web Server metadata\n",
+             "/usr/local/bin/cfn-hup --config /etc/cfn --verbose\n",
+
+             "/usr/local/bin/cfn-init -v ",
+             "         --stack ", { "Ref" : "AWS::StackName" },
+             "         --resource LaunchConfig ",
+             "         --configsets full_install",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n",
+
+             "/usr/local/bin/cfn-signal -e $? ",
+             "         --stack ", { "Ref" : "AWS::StackName" },
+             "         --resource WebServerGroup ",
+             "         --region ", { "Ref" : "AWS::Region" }, "\n"
+
+        ]]}}
+      }
+    },
+
+    "WebServerGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT15M",
+          "Count"   : "2"
+        }
+      },
+      "UpdatePolicy" : {
+        "AutoScalingRollingUpdate" : {
+          "MaxBatchSize" : "1",
+          "MinInstancesInService" : "1",
+          "PauseTime" : "PT15M",
+          "WaitOnResourceSignals": "true"
+        }
+      },
+      "Properties": {
+        "AvailabilityZones": { "Fn::GetAZs": "" },
+        "LaunchConfigurationName": { "Ref": "LaunchConfig" },
+        "MinSize": "2",
+        "MaxSize": "4",
+        "LoadBalancerNames": [ { "Ref": "ElasticLoadBalancer" } ]
+      }
+    }
+  },
+
+  "Outputs" : {
+    "URL" : {
+      "Description" : "URL of the website",
+      "Value" :  { "Fn::Join" : [ "", [ "http://", { "Fn::GetAtt" : [ "ElasticLoadBalancer", "DNSName" ]}]]}
+    }
+  }
+}

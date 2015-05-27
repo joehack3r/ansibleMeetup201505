@@ -1,0 +1,372 @@
+{
+	"AWSTemplateFormatVersion" : "2010-09-09",
+
+	"Description" : "Ansible Control Machine for Default VPC.",
+
+	"Parameters" : {
+
+		"HomeNetwork0CIDR" : {
+			"Description" : " The IP address range, in CIDR format, that can be used to access the public subnet.",
+			"Type": "String",
+			"MinLength": "9",
+			"MaxLength": "18",
+			"AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+			"ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+		},
+
+		"AnsibleAMI" : {
+			"Description" : "AMI for the Ansible server - typically latest Ubuntu LTS image identified from http://cloud.ubuntu.com/ami/",
+			"Type" : "String",
+			"AllowedPattern" : "ami-[0-9a-f]{8,8}"
+		},
+
+		"AnsibleInstanceType" : {
+			"Description" : "EC2 instance type",
+			"Type" : "String",
+			"AllowedValues" : ["t1.micro","t2.micro","t2.small","t2.medium","m1.small","m1.medium","m1.large","m1.xlarge","m2.xlarge","m2.2xlarge","m2.4xlarge","m3.xlarge","m3.2xlarge","c1.medium","c1.xlarge","cc1.4xlarge","cc2.8xlarge","cg1.4xlarge","hi1.4xlarge"],
+			"ConstraintDescription" : "Must be a valid EC2 instance type."
+		},
+
+		"AnsibleInstanceCountMin" : {
+			"Description" : "Min size of instances in auto scaling group",
+			"Type" : "String"
+		},
+
+		"AnsibleInstanceCountMax" : {
+			"Description" : "Max size of instances in auto scaling group",
+			"Type" : "String"
+		},
+
+		"BucketName" : {
+			"Description" : "Name of bucket containing files Ansbile needs and uses",
+			"Type" : "String"
+		},
+
+		"KeyName" : {
+			"Description" : "Name of an existing EC2 KeyPair to enable SSH access to the Ansible control instance",
+			"Type" : "AWS::EC2::KeyPair::KeyName"
+		},
+
+		"VpcId" : {
+			"Description" : "Physical ID of the VPC where resources should be created",
+			"Type" : "String",
+			"AllowedPattern" : "vpc-[0-9a-f]{8,8}"
+		}
+
+	},
+
+	"Resources" : {
+
+		"AnsibleSecurityGroup" : {
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Access only from Home Network",
+				"SecurityGroupIngress" : [{
+					"IpProtocol" : "tcp",
+					"FromPort" : "22",
+					"ToPort" : "22",
+					"CidrIp" : { "Ref" : "HomeNetwork0CIDR" }
+				},{
+					"IpProtocol" : "tcp",
+					"FromPort" : "3389",
+					"ToPort" : "3389",
+					"CidrIp" : { "Ref" : "HomeNetwork0CIDR" }
+				}],
+				"SecurityGroupEgress" : [{
+					"IpProtocol" : "tcp",
+					"FromPort" : "80",
+					"ToPort" : "80",
+					"CidrIp" : "0.0.0.0/0"
+					},{
+					"IpProtocol" : "tcp",
+					"FromPort" : "443",
+					"ToPort" : "443",
+					"CidrIp" : "0.0.0.0/0"
+				}],
+				"VpcId" : { "Ref" : "VpcId" }
+			}
+		},
+
+		"AnsibleIngressFromSelfPort22": {
+			"Type": "AWS::EC2::SecurityGroupIngress",
+			"Properties": {
+				"GroupId": { "Ref": "AnsibleSecurityGroup" },
+				"IpProtocol": "tcp",
+				"FromPort": "22",
+				"ToPort": "22",
+				"SourceSecurityGroupId" : { "Ref": "AnsibleSecurityGroup" }
+			}
+		},
+
+		"AnsibleEgressToSelfPort22": {
+			"Type": "AWS::EC2::SecurityGroupEgress",
+			"Properties": {
+				"GroupId": { "Ref": "AnsibleSecurityGroup" },
+				"IpProtocol": "tcp",
+				"FromPort": "22",
+				"ToPort": "22",
+				"DestinationSecurityGroupId" : { "Ref": "AnsibleSecurityGroup" }
+			}
+		},
+
+		"AnsibleIngressFromSelfPort5986": {
+			"Type": "AWS::EC2::SecurityGroupIngress",
+			"Properties": {
+				"GroupId": { "Ref": "AnsibleSecurityGroup" },
+				"IpProtocol": "tcp",
+				"FromPort": "5986",
+				"ToPort": "5986",
+				"SourceSecurityGroupId" : { "Ref": "AnsibleSecurityGroup" }
+			}
+		},
+
+		"AnsibleEgressToSelfPort5986": {
+			"Type": "AWS::EC2::SecurityGroupEgress",
+			"Properties": {
+				"GroupId": { "Ref": "AnsibleSecurityGroup" },
+				"IpProtocol": "tcp",
+				"FromPort": "5986",
+				"ToPort": "5986",
+				"DestinationSecurityGroupId" : { "Ref": "AnsibleSecurityGroup" }
+			}
+		},
+
+
+		"AnsibleRole": {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Statement": [
+						{
+							"Effect": "Allow",
+							"Principal": {
+								"Service": [
+									"ec2.amazonaws.com"
+								]
+							},
+							"Action": [
+								"sts:AssumeRole"
+							]
+						}
+					]
+				},
+				"Path": "/"
+			}
+		},
+
+		"AnsibleRolePolicies": {
+			"Type": "AWS::IAM::Policy",
+			"Properties": {
+				"PolicyName": "AnsibleControl",
+				"PolicyDocument": {
+					"Statement": [
+						{
+							"Action":[
+								"*"
+							],
+							"Effect":"Allow",
+							"Resource":[
+								{ "Fn::Join" : ["", [ "arn:aws:s3:::", { "Ref" : "BucketName" } ]]},
+								{ "Fn::Join" : ["", [ "arn:aws:s3:::", { "Ref" : "BucketName" }, "/*" ]]}
+							]
+						},{
+							"Action": [
+								"autoscaling:*",
+								"ec2:*",
+								"elasticloadbalancing:*",
+								"cloudformation:*",
+								"iam:*"
+							],
+							"Effect": "Allow",
+							"Resource":[
+								"*"
+							]
+						}
+					]
+				},
+			"Roles": [
+				{ "Ref": "AnsibleRole" }
+			]
+			}
+		},
+
+		"AnsibleInstanceProfile": {
+			"Type": "AWS::IAM::InstanceProfile",
+			"Properties": {
+				"Path": "/",
+				"Roles": [
+					{ "Ref": "AnsibleRole" }
+				]
+			}
+		},
+
+		"AnsibleWaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+
+		"CfnUser" : {
+			"Type" : "AWS::IAM::User",
+			"Properties" : {
+				"Path": "/",
+				"Policies": [{
+					"PolicyName": "root",
+					"PolicyDocument": { "Statement":[{
+						"Effect":"Allow",
+						"Action"	 : [
+							"cloudformation:DescribeStacks",
+							"cloudformation:DescribeStackResource",
+							"s3:GetObject"
+						],
+						"Resource":"*"
+					}]}
+				}]
+			}
+		},
+
+		"CfnKeys" : {
+			"Type" : "AWS::IAM::AccessKey",
+			"Properties" : {
+				"UserName" : {"Ref": "CfnUser"}
+			}
+		},
+
+		"AnsibleLaunchConfiguration": {
+			"Type": "AWS::AutoScaling::LaunchConfiguration",
+			"Metadata" : {
+				"AWS::CloudFormation::Init" : {
+					"config" : {
+						"files" : {
+
+							"/home/ubuntu/.ssh/ansible.pem" : {
+								"source" : { "Fn::Join" : ["", ["https://s3.amazonaws.com/", { "Ref" : "BucketName" }, "/ssh_keys/ansible.pem"]]},
+								"mode"   : "000600",
+								"owner"  : "ubuntu",
+								"group"  : "ubuntu"
+							},
+
+							"/home/ubuntu/hosts_for_ansible" : {
+								"content" : { "Fn::Join" : ["", [
+									"[local]\n",
+									"127.0.0.1\n"
+								]]},
+								"mode" : "000600",
+								"owner" : "ubuntu",
+								"group" : "ubuntu"
+							}
+						}
+					}
+				},
+				"AWS::CloudFormation::Authentication" : {
+					"S3AccessCreds" : {
+						"type" : "S3",
+						"accessKeyId" : { "Ref" : "CfnKeys" },
+						"secretKey" : {"Fn::GetAtt": ["CfnKeys", "SecretAccessKey"]},
+						"buckets" : [ { "Ref" : "BucketName" } ]
+					}
+				}
+			},
+			"Properties": {
+				"IamInstanceProfile": { "Ref": "AnsibleInstanceProfile" },
+				"ImageId": { "Ref" : "AnsibleAMI" },
+				"InstanceType": { "Ref": "AnsibleInstanceType" },
+				"KeyName": { "Ref": "KeyName" },
+				"InstanceMonitoring": "false",
+				"SecurityGroups": [ { "Ref": "AnsibleSecurityGroup" } ],
+				"UserData"       : { "Fn::Base64" : { "Fn::Join" : ["", [
+					"#!/bin/bash -v\n",
+
+					"# Helper function\n",
+					"function error_exit\n",
+					"{\n",
+					"  cfn-signal -e 1 -r \"$1\" '", { "Ref" : "AnsibleWaitHandle" }, "'\n",
+					"  exit 1\n",
+					"}\n",
+
+					"#Some pre-Ansible steps\n",
+					"apt-get update\n",
+					"apt-get -y upgrade\n",
+					"apt-get -y install git python-dev python-setuptools build-essential\n",
+					"easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz\n",
+					"easy_install pip\n",
+
+					"#Run cfn-init - to get files like the ansible.pem\n",
+					"cfn-init --region ", { "Ref" : "AWS::Region" },
+					"    -s ", { "Ref" : "AWS::StackId" }, " -r AnsibleLaunchConfiguration ",
+					"         --access-key ", { "Ref" : "CfnKeys" },
+					"         --secret-key ", {"Fn::GetAtt": ["CfnKeys", "SecretAccessKey"]}, " || error_exit 'Failed to run cfn-init'\n",
+
+					"#Ansible steps\n",
+					"pip install paramiko PyYAML jinja2 boto --upgrade\n",
+					"pip install http://github.com/diyan/pywinrm/archive/master.zip#egg=pywinrm\n",
+					"#Installing released Ansible\n",
+					"pip install ansible\n",
+					"echo '#Start ssh-agent at login (for Ansible)' >> /home/ubuntu/.bashrc\n",
+					"echo 'SSHAGENT=/usr/bin/ssh-agent' >> /home/ubuntu/.bashrc\n",
+					"echo 'SSHAGENTARGS=\"-s\"' >> /home/ubuntu/.bashrc\n",
+					"echo 'if [ -z \"$SSH_AUTH_SOCK\" -a -x \"$SSHAGENT\" ]; then ' >> /home/ubuntu/.bashrc\n",
+					"echo '  eval `$SSHAGENT $SSHAGENTARGS` ' >> /home/ubuntu/.bashrc\n",
+					"echo '  trap \"kill $SSH_AGENT_PID\" 0 ' >> /home/ubuntu/.bashrc\n",
+					"echo 'fi ' >> /home/ubuntu/.bashrc\n",
+					"echo 'ssh-add /home/ubuntu/.ssh/ansible.pem' >> /home/ubuntu/.bashrc\n",
+					"echo 'export ANSIBLE_HOSTS=/home/ubuntu/hosts_for_ansible' >> /home/ubuntu/.bashrc\n",
+
+					"#Installing development Ansible\n",
+					"cd /home/ubuntu\n",
+					"/usr/bin/git clone https://github.com/ansible/ansible.git\n",
+
+					"echo '[defaults]' > /home/ubuntu/.ansible.cfg\n",
+					"echo 'host_key_checking=False' >> /home/ubuntu/.ansible.cfg\n",
+
+					"echo 'echo \"To run the development branch of Ansible:\"' >> /home/ubuntu/.bashrc\n",
+					"echo 'echo \"source /home/ubuntu/ansible/hacking/env-setup\"' >> /home/ubuntu/.bashrc\n",
+
+					"# All is well so signal success\n",
+					"cfn-signal -e 0 -r \"Ansible instance setup complete\" '", { "Ref" : "AnsibleWaitHandle" }, "'\n",
+
+					"# And do a quick reboot since an apt-get upgrade was performed\n",
+					"/bin/sleep 5\n",
+					"/sbin/init 6\n"
+
+				]]}}
+			}
+		},
+
+		"AnsibleScalingGroup": {
+			"Type": "AWS::AutoScaling::AutoScalingGroup",
+			"Version": "2009-05-15",
+			"Properties": {
+				"AvailabilityZones": { "Fn::GetAZs" : "" },
+				"LaunchConfigurationName": { "Ref": "AnsibleLaunchConfiguration" },
+				"MinSize": { "Ref" : "AnsibleInstanceCountMin"},
+				"MaxSize": { "Ref" : "AnsibleInstanceCountMax"},
+				"Tags": [
+						{ "Key" : "Name",        "Value" : "ansible-control", "PropagateAtLaunch" : "true" },
+						{ "Key" : "environment", "Value" : "all",             "PropagateAtLaunch" : "true" },
+						{ "Key" : "product",     "Value" : "ansible",         "PropagateAtLaunch" : "true" },
+						{ "Key" : "role",        "Value" : "ansible",         "PropagateAtLaunch" : "true" },
+						{ "Key" : "owner",       "Value" : "JoeHack3r",       "PropagateAtLaunch" : "true" }
+				]
+			}
+		},
+		
+		"AnsibleWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : "AnsibleScalingGroup",
+			"Properties" : {
+				"Handle" : {"Ref" : "AnsibleWaitHandle"},
+				"Timeout" : "1800"
+			}
+		}
+	},
+
+	"Outputs" : {
+		"AnsibleInstanceProfile" : {
+			"Value" : { "Ref" : "AnsibleInstanceProfile" },
+			"Description" : "IAM Instance Profile for Ansible Control instance. Can be used for instances launched by Ansible."
+		},
+		"AnsibleSecurityGroupId" : {
+			"Value" : { "Ref" : "AnsibleSecurityGroup" },
+			"Description" : "Security Group ID for Ansible Control instance. Can be used for instances launched by Ansible."
+		}
+	}
+}

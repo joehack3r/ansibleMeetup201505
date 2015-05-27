@@ -1,0 +1,163 @@
+---
+# This playbook consists of two plays:
+# 1. Launching an instance
+# 2. Configuring the instance, creating an AMI, creating/updating a stack with the new AMI.
+
+# The play operates on the local (Ansible control) machine.
+- name: Start instance(s)
+  hosts: local
+  connection: local
+  user: root
+  gather_facts: false
+
+  vars:
+    keypair: ansible # Assumes the use of a SSH KeyPair named ansible.
+    instance_type: t2.micro
+    region: us-west-2
+
+  vars_prompt:
+    - name: "ami"
+      prompt: "What is the Amazon Machine Image (AMI) ID to use (Default is: Ubuntu 14.04, HVM:EBS, amd64, 20150506)"
+      default: "ami-3389b803" # us-west-2
+      private: no
+
+    - name: "vpc_subnet_id"
+      prompt: "What is the VPC Subnet ID to use:"
+      default: ""
+      private: no
+
+    - name: "security_group_id"
+      prompt: "What is the Amazon Security Group to use:"
+      default: ""
+      private: no
+
+    - name: "iam_instance_profile"
+      prompt: "What is the IAM Instance Profile to use:"
+      default: ""
+      private: no
+
+
+  # Launch instances with the following parameters.  Register the output.
+  tasks:
+    - name: Launch instance 
+      local_action:
+        module: ec2
+        keypair: "{{keypair}}"
+        vpc_subnet_id: "{{vpc_subnet_id}}" # needed if using non-default VPC
+        group_id: "{{security_group_id}}"
+        instance_type: "{{instance_type}}"
+        instance_profile_name: "{{iam_instance_profile}}"
+        image: "{{ami}}"
+        count: "1"
+        region: "{{region}}"
+        wait: true
+      register: ec2
+
+    - name: Wait for the instance(s) to boot by checking the ssh port
+      wait_for: host={{item.private_ip}} port=22 delay=60 timeout=600 state=started
+      with_items: ec2.instances
+
+    # Use with_items to add each instance(s) private IP to a new hostgroup for use in the next play.
+    - name: Add new instance(s) to host group
+      add_host: hostname={{item.private_ip}} groupname=deploy
+      with_items: ec2.instances
+
+    - name: Tag instance(s)
+      local_action: ec2_tag
+        resource={{item.id}}
+        state=present
+        region={{region}}
+      with_items: ec2.instances
+      args:
+        tags:
+          Name: Nginx-AMI
+          owner: JoeGardner
+
+# This play targets the new host group and configures it
+- name: Configure instance
+  hosts: deploy
+  user: ubuntu
+  sudo: True
+
+  # Do some stuff on each instance ....
+  vars:
+    custom_application_basepath: "/opt/apps"
+    custom_logging_basepath: "/opt/logs"
+    region: us-west-2
+
+  vars_prompt:
+    - name: "mybucket"
+      prompt: "In which S3 bucket is the zipped static web file archive stored?"
+      default: ""
+      private: no
+
+    - name: "path_to_archive"
+      prompt: "What is the path to the file (no leading or trailing slash)?"
+      default: ""
+      private: no
+
+    - name: "filename"
+      prompt: "What is the name of the archive?"
+      default: "webfiles1.zip"
+      private: no
+
+    - name: "myStackName"
+      prompt: "What is the name of CloudFormation stack to create/update?"
+      default: "myStackName3"
+      private: no
+
+    - name: "VpcId"
+      prompt: "What is the VPC ID to launch the CloudFormation stack?"
+      default: ""
+      private: no
+
+  roles:
+    - { role: common-os }
+    - { role: common-ec2 }
+    - { role: nginx, nginx_version: "1.6.2" } # Overrides the default of version 1.4.2
+    - { role: staticwebfiles }
+
+  tasks:
+    # Cleanup
+
+  post_tasks:
+    # Create and tag the AMI
+    - include: roles/common-ec2/tasks/create-ami.yml
+      vars:
+        home_directory_list: ["ubuntu"]
+        instance_id: "{{ ansible_ec2_instance_id }}"
+        image_name: Nginx-built-{{ansible_date_time.date}}-{{ansible_date_time.hour}}{{ansible_date_time.minute}}{{ansible_date_time.second}}{{ansible_date_time.tz}}
+        timeout: 600
+    - name: Tag AMI(s)
+      local_action: ec2_tag
+        resource={{ec2Ami.image_id}}
+        state=present
+        region={{region}}
+      with_items: ec2Ami.instances
+      args:
+        tags:
+          Name: Nginx-AMI
+          instanceid: "{{ ansible_ec2_instance_id }}"
+          role: Nginx
+          date: "{{ansible_date_time.date}}-{{ansible_date_time.hour}}{{ansible_date_time.minute}}{{ansible_date_time.second}}{{ansible_date_time.tz}}"
+
+    # Terminate instance after AMI has been created
+    - name: Terminate instance that was previously launched
+      local_action:
+        module: ec2
+        state: 'absent'
+        region: "{{region}}"
+        instance_ids: "{{ ansible_ec2_instance_id }}"
+
+    # Create/update the CloudFormation stack
+    - name: Create or update CloudFormation Stack
+      local_action: cloudformation
+        stack_name="{{myStackName}}"
+        state=present
+        region=us-west-2
+        template=Lab3.json
+      args:
+        template_parameters:
+          AMI: "{{ec2Ami.image_id}}"
+          VpcId: "{{VpcId}}"
+          InstanceType: t2.micro

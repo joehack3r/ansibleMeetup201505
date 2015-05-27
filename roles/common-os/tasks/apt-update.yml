@@ -1,0 +1,3 @@
+---
+- name: Update apt cache
+  action: apt update_cache=yes force=yes

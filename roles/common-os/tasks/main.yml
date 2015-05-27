@@ -1,0 +1,16 @@
+---
+- include: apt-update.yml
+  when: ansible_os_family == 'Debian'
+- include: apt-upgrade.yml
+  when: ansible_os_family == 'Debian'
+
+- include: unzip.yml
+  when: ansible_os_family == 'Debian'
+
+- name: Create application directory
+  file: path={{custom_application_basepath}} state=directory
+  when: ansible_os_family == 'Debian' and custom_application_basepath != ""
+
+- name: Create log directory
+  file: path={{custom_logging_basepath}} state=directory
+  when: ansible_os_family == 'Debian' and custom_logging_basepath != ""

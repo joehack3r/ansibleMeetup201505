@@ -1,0 +1,12 @@
+---
+- name: Create destination directory
+  file: path={{custom_application_basepath}}/staticwebfiles state=directory
+
+- name: Download archive from S3
+  s3: bucket="{{mybucket}}" object="/{{path_to_archive}}/{{filename}}" dest="{{custom_application_basepath}}/staticwebfiles/{{filename}}" mode=get
+
+- name: Unzip archive
+  unarchive: src={{custom_application_basepath}}/staticwebfiles/{{filename}} dest={{custom_application_basepath}}/staticwebfiles copy=no
+
+- name: Cleanup archive
+  file: path={{custom_application_basepath}}/staticwebfiles/{{filename}} state=absent

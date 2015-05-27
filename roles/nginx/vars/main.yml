@@ -1,0 +1,3 @@
+---
+nginx_version: "1.4.2"
+nginx_configure_options: "--with-http_ssl_module"

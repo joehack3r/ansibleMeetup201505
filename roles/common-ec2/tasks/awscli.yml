@@ -1,0 +1,3 @@
+---
+- name: Install AWSCLI
+  action: apt name=awscli state=present

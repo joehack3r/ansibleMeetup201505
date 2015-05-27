@@ -1,0 +1,3 @@
+---
+- name: Install cfn-helper
+  command: easy_install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz

@@ -1,0 +1,9 @@
+---
+- name: Install build-essential (provides many packages that are needed when compiling from source)
+  action: apt name=build-essential state=latest
+
+- name: Install libpcre3-dev
+  action: apt name=libpcre3-dev state=latest
+
+- name: Install libssl-dev
+  action: apt name=libssl-dev state=latest

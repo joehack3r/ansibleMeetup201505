@@ -1,0 +1,22 @@
+---
+- name: Log cleanup
+  shell: "find /var/log -type f -exec truncate --size 0 {} \\;"
+
+- name: Remove authorized keys | root
+  file: path=/root/.ssh/authorized_keys state=absent
+  when: ansible_os_family == "Debian" or ansible_os_family == "RedHat"
+
+- name: Remove authorized keys | users
+  file: path=/home/{{item}}/.ssh/authorized_keys state=absent
+  with_items: home_directory_list
+  when: ansible_os_family == "Debian" or ansible_os_family == "RedHat"
+
+- name: Create Amazon Machine Image (AMI)
+  local_action:
+    module: ec2_ami
+    wait: yes
+    region: "{{ region }}"
+    instance_id: "{{ instance_id }}"
+    name: "{{ image_name }}"
+    wait_timeout:  "{{ timeout }}"
+  register: ec2Ami
